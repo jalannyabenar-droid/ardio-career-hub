@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>Application tracker</title>
+<style>
+body{margin:0;font:16px/1.5 system-ui,sans-serif;background:#f3f7f9;color:#0b1f3a}main{max-width:44rem;margin:0 auto;padding:1rem}
+h1{font-size:1.5rem}label{display:block;margin:.8rem 0;font-weight:600}
+input,select,textarea{display:block;width:100%;margin-top:.25rem;padding:.7rem;font:inherit;border:1px solid #b9c0cf;border-radius:8px;background:#fff;box-sizing:border-box}textarea{min-height:5rem}
+button,.b{font:inherit;font-weight:600;padding:.6rem .9rem;border:0;border-radius:8px;background:#0b1f3a;color:#fff;cursor:pointer;text-decoration:none;display:inline-block}
+.s{background:#e3e7ef;color:#0b1f3a}.d{background:#b42318}.t{background:#0a7480}
+.c{background:#fff;border:1px solid #dfe6ee;border-radius:14px;padding:1rem;margin:.7rem 0}.c h3{margin:0;font-size:1.05rem}.m{color:#5a6b82;font-size:.9rem;margin:.2rem 0 .6rem}
+.row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}header{display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap}
+#msg{color:#b42318;font-weight:600}dialog{width:min(44rem,94vw);border:0;border-radius:14px}textarea.big{min-height:18rem}
+</style></head><body><main id="app"></main>
+<dialog id="dg"><div id="dgb"></div></dialog>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script>
+const C=window.CAREER_CONFIG||{},$=s=>document.querySelector(s),app=$('#app');
+if(!C.SUPABASE_URL||!C.SUPABASE_ANON_KEY){app.innerHTML='<h1>Not set up</h1><p>Add your Supabase URL and anon key to config.js first.</p>';throw 0}
+const sb=supabase.createClient(C.SUPABASE_URL,C.SUPABASE_ANON_KEY);
+const S=['Saved','Ready to Apply','Applied','Interview','Assessment','Offer','Rejected','Follow-up Needed'];
+let rows=[],filt='';
+const esc=s=>String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+const say=t=>{const e=$('#msg');if(e)e.textContent=t};
+const qp=new URLSearchParams(location.search);
+(async()=>{const{data:{session}}=await sb.auth.getSession();session?load():login()})();
+function login(){app.innerHTML=`<h1>Tracker sign in</h1><label>Email<input id="e" type="email" autocomplete="username"></label><label>Password<input id="p" type="password" autocomplete="current-password"></label><button id="go">Sign in</button><p id="msg" role="status"></p>`;
+ $('#go').onclick=async()=>{const{error}=await sb.auth.signInWithPassword({email:$('#e').value.trim(),password:$('#p').value});error?say(error.message):load()}}
+async function load(){const{data,error}=await sb.from('applications').select('*').order('created_at',{ascending:false});
+ if(error){app.innerHTML=`<p id="msg">${esc(error.message)} (Did you run supabase-tracker.sql?)</p>`;return}
+ rows=data;if(qp.get('company')||qp.get('role')){const x={kind:qp.get('type')==='client'?'client':'job',company:qp.get('company')||'',role:qp.get('role')||'',url:qp.get('url')||''};history.replaceState(null,'','tracker.html');return form(null,x)}
+ list()}
+function list(){const v=rows.filter(r=>!filt||r.status===filt);
+ app.innerHTML=`<header><h1>Application tracker</h1><div class="row"><a class="b s" href="index.html#jobs">Find jobs</a><button class="s" id="so">Sign out</button></div></header>
+ <div class="row"><button id="add">Add</button><select id="fs" style="width:auto"><option value="">All statuses</option>${S.map(s=>`<option ${s===filt?'selected':''}>${s}</option>`).join('')}</select></div>
+ <p class="m">${v.length} shown. Nothing is applied or sent automatically. Apply opens the official page.</p>
+ ${v.map(r=>`<div class="c"><h3>${esc(r.role)}</h3><p class="m">${esc(r.company)} | ${r.kind==='client'?'Client lead':'Job'}${r.applied_date?' | Applied '+r.applied_date:''}${r.deadline?' | Deadline '+r.deadline:''}${r.next_action?'<br>Next: '+esc(r.next_action):''}</p>
+ <div class="row"><select data-st="${r.id}" style="width:auto">${S.map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}</select>
+ ${r.url?`<a class="b t" href="${esc(r.url)}" target="_blank" rel="noopener">Apply</a>`:''}<button class="s" data-pr="${r.id}">Prepare</button><button class="s" data-ed="${r.id}">Edit</button></div></div>`).join('')||'<p>Nothing here yet.</p>'}`;
+ $('#so').onclick=async()=>{await sb.auth.signOut();login()};$('#add').onclick=()=>form();$('#fs').onchange=e=>{filt=e.target.value;list()};
+ app.querySelectorAll('[data-ed]').forEach(b=>b.onclick=()=>form(rows.find(r=>r.id===b.dataset.ed)));
+ app.querySelectorAll('[data-pr]').forEach(b=>b.onclick=()=>prep(rows.find(r=>r.id===b.dataset.pr)));
+ app.querySelectorAll('[data-st]').forEach(s=>s.onchange=async()=>{const{error}=await sb.from('applications').update({status:s.value}).eq('id',s.dataset.st);error?alert(error.message):load()})}
+function form(r,pre){const x=r||pre||{};
+ app.innerHTML=`<h1>${r?'Edit':'New'} entry</h1>
+ <label>Type<select id="k"><option value="job" ${x.kind!=='client'?'selected':''}>Job</option><option value="client" ${x.kind==='client'?'selected':''}>Client lead</option></select></label>
+ <label>Company or client<input id="c" value="${esc(x.company)}"></label><label>Role or project<input id="r" value="${esc(x.role)}"></label>
+ <label>Application URL<input id="u" type="url" value="${esc(x.url)}"></label>
+ <label>Status<select id="s">${S.map(s=>`<option ${s===(x.status||'Saved')?'selected':''}>${s}</option>`).join('')}</select></label>
+ <label>Date applied<input id="a" type="date" value="${esc(x.applied_date)}"></label><label>Deadline<input id="d" type="date" value="${esc(x.deadline)}"></label>
+ <label>Next action<input id="n" value="${esc(x.next_action)}"></label><label>Notes<textarea id="o">${esc(x.notes)}</textarea></label>
+ <div class="row"><button id="sv">Save</button><button class="s" id="cn">Cancel</button>${r?'<button class="d" id="dl">Delete</button>':''}</div><p id="msg" role="status"></p>`;
+ $('#cn').onclick=list;
+ if(r)$('#dl').onclick=async()=>{if(!confirm('Delete this entry?'))return;const{error}=await sb.from('applications').delete().eq('id',r.id);error?say(error.message):load()};
+ $('#sv').onclick=async()=>{if(!$('#c').value.trim()||!$('#r').value.trim())return say('Company and role are required.');
+  const row={kind:$('#k').value,company:$('#c').value.trim(),role:$('#r').value.trim(),url:$('#u').value.trim()||null,status:$('#s').value,applied_date:$('#a').value||null,deadline:$('#d').value||null,next_action:$('#n').value.trim()||null,notes:$('#o').value.trim()||null};
+  const{error}=r?await sb.from('applications').update(row).eq('id',r.id):await sb.from('applications').insert(row);error?say(error.message):load()}}
+function prep(r){const job=r.kind!=='client';
+ const body=job?`Dear Hiring Team at ${r.company},
+
+I am applying for the ${r.role} position. I am a digital marketing consultant based in Surabaya, Indonesia, with experience in social media content planning, KOL and influencer coordination, and campaign and product launch planning.
+
+At PT Gudang Garam Tbk. I worked with 75 KOLs and 15 media partners and initiated the use of nano- and micro-influencers. Earlier I engaged 32 motorcycle communities and organized 5 events for community hubs. Today I run my own digital marketing agency and currently handle strategy, content planning and KOL coordination for BuySkin, a body care brand.
+
+I also produce my own creative content, including posters, photo and video edits and AI-assisted visuals. My English is at an intermediate working level, strongest in written briefs and messages.
+
+[Add one sentence on why ${r.company} interests you, and one requirement from the job post that you meet.]
+
+Thank you for your time.
+Ardio Hakim Putranto
+ardiohakimputranto@gmail.com | +62 819-9752-6869`
+ :`Hello ${r.company},
+
+I am Ardio Hakim Putranto, a digital marketing consultant in Surabaya. I help brands with Instagram and TikTok content planning, KOL and influencer coordination, promotional campaigns, product launch planning and creative content (posters, photo and video editing).
+
+I currently run my own agency and work with BuySkin, a body care brand, on strategy, content planning and KOL coordination. Before that, I spent several years at PT Gudang Garam Tbk. in community marketing, events, social media and KOL activities.
+
+[Add one sentence about what you noticed in their social media or product, and one idea for ${r.role}.]
+
+If useful, I can share portfolio samples (where permitted) and discuss a small first project.
+
+Ardio Hakim Putranto
+ardiohakimputranto@gmail.com | +62 819-9752-6869`;
+ $('#dgb').innerHTML=`<h3>${job?'Cover letter':'Pitch message'} template</h3><p class="m">Edit the [bracketed] part and check every line is true before sending. This is a template, not AI writing.</p><textarea class="big" id="tx">${esc(body)}</textarea>
+ ${job?`<h3>Tailor your CV for this role</h3><ul><li>Copy 5 keywords from the job post that match your real experience and use them in your summary and bullets.</li><li>Move the most relevant role bullets to the top.</li><li>Keep your numbers exactly as confirmed. Add no new claims.</li><li>Keep English wording simple and honest.</li></ul>`:''}
+ <div class="row"><button id="cp">Copy text</button><button class="s" id="xx">Close</button></div>`;
+ $('#cp').onclick=async()=>{try{await navigator.clipboard.writeText($('#tx').value);$('#cp').textContent='Copied'}catch(e){$('#tx').select()}};
+ $('#xx').onclick=()=>$('#dg').close();$('#dg').showModal()}
+</script></body></html>
